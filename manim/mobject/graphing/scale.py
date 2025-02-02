@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any, Iterable
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 __all__ = ["LogBase", "LinearBase"]
 
@@ -12,15 +15,15 @@ if TYPE_CHECKING:
 
 
 class _ScaleBase:
-    """Scale baseclass for graphing/functions."""
+    """Scale baseclass for graphing/functions.
+
+    Parameters
+    ----------
+    custom_labels
+        Whether to create custom labels when plotted on a :class:`~.NumberLine`.
+    """
 
     def __init__(self, custom_labels: bool = False):
-        """
-        Parameters
-        ----------
-        custom_labels
-            Whether to create custom labels when plotted on a :class:`~.NumberLine`.
-        """
         self.custom_labels = custom_labels
 
     def function(self, value: float) -> float:
@@ -87,7 +90,6 @@ class LinearBase(_ScaleBase):
         scale_factor
             The slope of the linear function, by default 1.0
         """
-
         super().__init__()
         self.scale_factor = scale_factor
 
@@ -120,9 +122,9 @@ class LogBase(_ScaleBase):
         ----------
         base
             The base of the log, by default 10.
-        custom_labels : bool, optional
+        custom_labels
             For use with :class:`~.Axes`:
-            Whetherer or not to include ``LaTeX`` axis labels, by default True.
+            Whether or not to include ``LaTeX`` axis labels, by default True.
 
         Examples
         --------
@@ -141,11 +143,20 @@ class LogBase(_ScaleBase):
 
     def inverse_function(self, value: float) -> float:
         """Inverse of ``function``. The value must be greater than 0"""
-        if value <= 0:
+        if isinstance(value, np.ndarray):
+            condition = value.any() <= 0
+
+            def func(value, base):
+                return np.log(value) / np.log(base)
+        else:
+            condition = value <= 0
+            func = math.log
+
+        if condition:
             raise ValueError(
                 "log(0) is undefined. Make sure the value is in the domain of the function"
             )
-        value = math.log(value, self.base)
+        value = func(value, self.base)
         return value
 
     def get_custom_labels(
@@ -165,12 +176,11 @@ class LogBase(_ScaleBase):
         base_config
             Additional arguments to be passed to :class:`~.Integer`.
         """
-
         # uses `format` syntax to control the number of decimal places.
         tex_labels = [
             Integer(
                 self.base,
-                unit="^{%s}" % (f"{self.inverse_function(i):.{unit_decimal_places}f}"),
+                unit="^{%s}" % (f"{self.inverse_function(i):.{unit_decimal_places}f}"),  # noqa: UP031
                 **base_config,
             )
             for i in val_range

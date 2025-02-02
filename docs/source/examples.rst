@@ -90,11 +90,11 @@ Basic Concepts
                 [[i * 256 / n for i in range(0, n)] for _ in range(0, n)]
             )
             image = ImageMobject(imageArray).scale(2)
-            image.background_rectangle = SurroundingRectangle(image, GREEN)
+            image.background_rectangle = SurroundingRectangle(image, color=GREEN)
             self.add(image, image.background_rectangle)
 
 .. manim:: BooleanOperations
-    :ref_classes: Union Intersection Exclusion
+    :ref_classes: Union Intersection Exclusion Difference
 
     class BooleanOperations(Scene):
         def construct(self):
@@ -341,7 +341,7 @@ Plotting with Manim
                 axes.i2gp(TAU, cos_graph), color=YELLOW, line_func=Line
             )
             line_label = axes.get_graph_label(
-                cos_graph, "x=2\pi", x_val=TAU, direction=UR, color=WHITE
+                cos_graph, r"x=2\pi", x_val=TAU, direction=UR, color=WHITE
             )
 
             plot = VGroup(axes, sin_graph, cos_graph, vert_line)
@@ -407,6 +407,64 @@ Plotting with Manim
 
             self.add(ax, labels, curve_1, curve_2, line_1, line_2, riemann_area, area)
 
+.. manim:: PolygonOnAxes
+    :ref_classes: Axes Polygon
+
+    class PolygonOnAxes(Scene):
+        def get_rectangle_corners(self, bottom_left, top_right):
+            return [
+                (top_right[0], top_right[1]),
+                (bottom_left[0], top_right[1]),
+                (bottom_left[0], bottom_left[1]),
+                (top_right[0], bottom_left[1]),
+            ]
+
+        def construct(self):
+            ax = Axes(
+                x_range=[0, 10],
+                y_range=[0, 10],
+                x_length=6,
+                y_length=6,
+                axis_config={"include_tip": False},
+            )
+
+            t = ValueTracker(5)
+            k = 25
+
+            graph = ax.plot(
+                lambda x: k / x,
+                color=YELLOW_D,
+                x_range=[k / 10, 10.0, 0.01],
+                use_smoothing=False,
+            )
+
+            def get_rectangle():
+                polygon = Polygon(
+                    *[
+                        ax.c2p(*i)
+                        for i in self.get_rectangle_corners(
+                            (0, 0), (t.get_value(), k / t.get_value())
+                        )
+                    ]
+                )
+                polygon.stroke_width = 1
+                polygon.set_fill(BLUE, opacity=0.5)
+                polygon.set_stroke(YELLOW_B)
+                return polygon
+
+            polygon = always_redraw(get_rectangle)
+
+            dot = Dot()
+            dot.add_updater(lambda x: x.move_to(ax.c2p(t.get_value(), k / t.get_value())))
+            dot.set_z_index(10)
+
+            self.add(ax, graph, dot)
+            self.play(Create(polygon))
+            self.play(t.animate.set_value(10))
+            self.play(t.animate.set_value(k / 10))
+            self.play(t.animate.set_value(5))
+
+
 .. manim:: HeatDiagramPlot
     :save_last_frame:
     :ref_modules: manim.mobject.coordinate_systems
@@ -424,7 +482,7 @@ Plotting with Manim
                 tips=False,
             )
             labels = ax.get_axis_labels(
-                x_label=Tex("$\Delta Q$"), y_label=Tex("T[$^\circ C$]")
+                x_label=Tex(r"$\Delta Q$"), y_label=Tex(r"T[$^\circ C$]")
             )
 
             x_vals = [0, 8, 38, 39]
@@ -609,7 +667,7 @@ Special Camera Settings
 
    class ThreeDSurfacePlot(ThreeDScene):
        def construct(self):
-           resolution_fa = 42
+           resolution_fa = 24
            self.set_camera_orientation(phi=75 * DEGREES, theta=-30 * DEGREES)
 
            def param_gauss(u, v):
@@ -727,8 +785,8 @@ Advanced Projects
 
         def add_x_labels(self):
             x_labels = [
-                MathTex("\pi"), MathTex("2 \pi"),
-                MathTex("3 \pi"), MathTex("4 \pi"),
+                MathTex(r"\pi"), MathTex(r"2 \pi"),
+                MathTex(r"3 \pi"), MathTex(r"4 \pi"),
             ]
 
             for i in range(len(x_labels)):

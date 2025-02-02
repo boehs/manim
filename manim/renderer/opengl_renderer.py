@@ -1,14 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import itertools as it
-import sys
 import time
+from functools import cached_property
 from typing import Any
-
-if sys.version_info < (3, 8):
-    from backports.cached_property import cached_property
-else:
-    from functools import cached_property
 
 import moderngl
 import numpy as np
@@ -39,6 +35,8 @@ from .vectorized_mobject_rendering import (
     render_opengl_vectorized_mobject_stroke,
 )
 
+__all__ = ["OpenGLCamera", "OpenGLRenderer"]
+
 
 class OpenGLCamera(OpenGLMobject):
     euler_angles = _Data()
@@ -65,12 +63,12 @@ class OpenGLCamera(OpenGLMobject):
         if self.orthographic:
             self.projection_matrix = opengl.orthographic_projection_matrix()
             self.unformatted_projection_matrix = opengl.orthographic_projection_matrix(
-                format=False,
+                format_=False,
             )
         else:
             self.projection_matrix = opengl.perspective_projection_matrix()
             self.unformatted_projection_matrix = opengl.perspective_projection_matrix(
-                format=False,
+                format_=False,
             )
 
         if frame_shape is None:
@@ -217,17 +215,12 @@ class OpenGLCamera(OpenGLMobject):
         self.refresh_rotation_matrix()
 
 
-points_per_curve = 3
-JOINT_TYPE_MAP = {
-    "auto": 0,
-    "round": 1,
-    "bevel": 2,
-    "miter": 3,
-}
-
-
 class OpenGLRenderer:
-    def __init__(self, file_writer_class=SceneFileWriter, skip_animations=False):
+    def __init__(
+        self,
+        file_writer_class: type[SceneFileWriter] = SceneFileWriter,
+        skip_animations: bool = False,
+    ) -> None:
         # Measured in pixel widths, used for vector graphics
         self.anti_alias_width = 1.5
         self._file_writer_class = file_writer_class
@@ -246,7 +239,7 @@ class OpenGLRenderer:
         # Initialize texture map.
         self.path_to_texture_id = {}
 
-        self._background_color = color_to_rgba(config["background_color"], 1.0)
+        self.background_color = config["background_color"]
 
     def init_scene(self, scene):
         self.partial_movie_files = []
@@ -255,6 +248,7 @@ class OpenGLRenderer:
             scene.__class__.__name__,
         )
         self.scene = scene
+        self.background_color = config["background_color"]
         if not hasattr(self, "window"):
             if self.should_create_window():
                 from .opengl_renderer_window import Window
@@ -347,10 +341,8 @@ class OpenGLRenderer:
                 shader_wrapper.uniforms.items(),
                 self.perspective_uniforms.items(),
             ):
-                try:
+                with contextlib.suppress(KeyError):
                     shader.set_uniform(name, value)
-                except KeyError:
-                    pass
             try:
                 shader.set_uniform(
                     "u_view_matrix", self.scene.camera.formatted_view_matrix
@@ -380,20 +372,23 @@ class OpenGLRenderer:
             mesh.render()
 
     def get_texture_id(self, path):
-        if path not in self.path_to_texture_id:
-            # A way to increase tid's sequentially
+        if repr(path) not in self.path_to_texture_id:
             tid = len(self.path_to_texture_id)
-            im = Image.open(path)
             texture = self.context.texture(
-                size=im.size,
-                components=len(im.getbands()),
-                data=im.tobytes(),
+                size=path.size,
+                components=len(path.getbands()),
+                data=path.tobytes(),
             )
+            texture.repeat_x = False
+            texture.repeat_y = False
+            texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+            texture.swizzle = "RRR1" if path.mode == "L" else "RGBA"
             texture.use(location=tid)
-            self.path_to_texture_id[path] = tid
-        return self.path_to_texture_id[path]
+            self.path_to_texture_id[repr(path)] = tid
 
-    def update_skipping_status(self):
+        return self.path_to_texture_id[repr(path)]
+
+    def update_skipping_status(self) -> None:
         """
         This method is used internally to check if the current
         animation needs to be skipped or not. It also checks if
@@ -405,13 +400,13 @@ class OpenGLRenderer:
         if self.file_writer.sections[-1].skip_animations:
             self.skip_animations = True
         if (
-            config["from_animation_number"]
-            and self.num_plays < config["from_animation_number"]
+            config.from_animation_number > 0
+            and self.num_plays < config.from_animation_number
         ):
             self.skip_animations = True
         if (
-            config["upto_animation_number"]
-            and self.num_plays > config["upto_animation_number"]
+            config.upto_animation_number >= 0
+            and self.num_plays > config.upto_animation_number
         ):
             self.skip_animations = True
             raise EndSceneEarlyException()
@@ -428,8 +423,9 @@ class OpenGLRenderer:
             self.update_frame(scene)
 
             if not self.skip_animations:
-                for _ in range(int(config.frame_rate * scene.duration)):
-                    self.file_writer.write_frame(self)
+                self.file_writer.write_frame(
+                    self, num_frames=int(config.frame_rate * scene.duration)
+                )
 
             if self.window is not None:
                 self.window.swap_buffers()
@@ -575,7 +571,7 @@ class OpenGLRenderer:
         if pixel_shape is None:
             return np.array([0, 0, 0])
         pw, ph = pixel_shape
-        fw, fh = config["frame_width"], config["frame_height"]
+        fh = config["frame_height"]
         fc = self.camera.get_center()
         if relative:
             return 2 * np.array([px / pw, py / ph, 0])

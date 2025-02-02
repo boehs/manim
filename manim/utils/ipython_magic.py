@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import mimetypes
-import os
 import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from manim import Group, config, logger, tempconfig
+from manim import config, logger, tempconfig
 from manim.__main__ import main
 from manim.renderer.shader import shader_program_cache
+
+from ..constants import RendererType
+
+__all__ = ["ManimMagic"]
 
 try:
     from IPython import get_ipython
@@ -31,15 +34,15 @@ else:
     class ManimMagic(Magics):
         def __init__(self, shell: InteractiveShell) -> None:
             super().__init__(shell)
-            self.rendered_files = {}
+            self.rendered_files: dict[Path, Path] = {}
 
         @needs_local_scope
         @line_cell_magic
         def manim(
             self,
             line: str,
-            cell: str = None,
-            local_ns: dict[str, Any] = None,
+            cell: str | None = None,
+            local_ns: dict[str, Any] | None = None,
         ) -> None:
             r"""Render Manim scenes contained in IPython cells.
             Works as a line or cell magic.
@@ -124,23 +127,15 @@ else:
 
             modified_args = self.add_additional_args(args)
             args = main(modified_args, standalone_mode=False, prog_name="manim")
+            assert isinstance(local_ns, dict)
             with tempconfig(local_ns.get("config", {})):
-                config.digest_args(args)
+                config.digest_args(args)  # type: ignore[arg-type]
 
                 renderer = None
-                if config.renderer == "opengl":
-                    # Check if the imported mobjects extend the OpenGLMobject class
-                    # meaning ConvertToOpenGL did its job
-                    if "OpenGLMobject" in map(lambda cls: cls.__name__, Group.mro()):
-                        from manim.renderer.opengl_renderer import OpenGLRenderer
+                if config.renderer == RendererType.OPENGL:
+                    from manim.renderer.opengl_renderer import OpenGLRenderer
 
-                        renderer = OpenGLRenderer()
-                    else:
-                        logger.warning(
-                            "Renderer must be set to OpenGL in the configuration file "
-                            "before importing Manim! Using cairo renderer instead.",
-                        )
-                        config.renderer = "cairo"
+                    renderer = OpenGLRenderer()
 
                 try:
                     SceneClass = local_ns[config["scene_names"][0]]
@@ -169,12 +164,13 @@ else:
                 if local_path in self.rendered_files:
                     self.rendered_files[local_path].unlink()
                 self.rendered_files[local_path] = tmpfile
-                os.makedirs(tmpfile.parent, exist_ok=True)
+                tmpfile.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(local_path, tmpfile)
 
                 file_type = mimetypes.guess_type(config["output_file"])[0]
+                assert isinstance(file_type, str)
                 embed = config["media_embed"]
-                if embed is None:
+                if not embed:
                     # videos need to be embedded when running in google colab.
                     # do this automatically in case config.media_embed has not been
                     # set explicitly.
@@ -200,4 +196,7 @@ else:
 
 
 def _generate_file_name() -> str:
-    return config["scene_names"][0] + "@" + datetime.now().strftime("%Y-%m-%d@%H-%M-%S")
+    val: str = (
+        config["scene_names"][0] + "@" + datetime.now().strftime("%Y-%m-%d@%H-%M-%S")
+    )
+    return val

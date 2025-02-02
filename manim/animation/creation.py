@@ -67,30 +67,36 @@ __all__ = [
     "ShowIncreasingSubsets",
     "SpiralIn",
     "AddTextLetterByLetter",
+    "RemoveTextLetterByLetter",
     "ShowSubmobjectsOneByOne",
     "AddTextWordByWord",
+    "TypeWithCursor",
+    "UntypeWithCursor",
 ]
 
 
 import itertools as it
-from typing import TYPE_CHECKING, Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
-from colour import Color
 
 if TYPE_CHECKING:
     from manim.mobject.text.text_mobject import Text
+    from manim.scene.scene import Scene
 
+from manim.constants import RIGHT, TAU
 from manim.mobject.opengl.opengl_surface import OpenGLSurface
 from manim.mobject.opengl.opengl_vectorized_mobject import OpenGLVMobject
+from manim.utils.color import ManimColor
 
+from .. import config
 from ..animation.animation import Animation
 from ..animation.composition import Succession
-from ..constants import TAU
 from ..mobject.mobject import Group, Mobject
 from ..mobject.types.vectorized_mobject import VMobject
 from ..utils.bezier import integer_interpolate
-from ..utils.rate_functions import double_smooth, linear, smooth
+from ..utils.rate_functions import double_smooth, linear
 
 
 class ShowPartial(Animation):
@@ -136,7 +142,7 @@ class Create(ShowPartial):
 
     Parameters
     ----------
-    mobject : :class:`~.VMobject`
+    mobject
         The VMobject to animate.
 
     Raises
@@ -191,13 +197,13 @@ class Uncreate(Create):
     def __init__(
         self,
         mobject: VMobject | OpenGLVMobject,
-        rate_func: Callable[[float], float] = lambda t: smooth(1 - t),
+        reverse_rate_function: bool = True,
         remover: bool = True,
         **kwargs,
     ) -> None:
         super().__init__(
             mobject,
-            rate_func=rate_func,
+            reverse_rate_function=reverse_rate_function,
             introducer=False,
             remover=remover,
             **kwargs,
@@ -244,7 +250,9 @@ class DrawBorderThenFill(Animation):
 
     def _typecheck_input(self, vmobject: VMobject | OpenGLVMobject) -> None:
         if not isinstance(vmobject, (VMobject, OpenGLVMobject)):
-            raise TypeError("DrawBorderThenFill only works for vectorized Mobjects")
+            raise TypeError(
+                f"{self.__class__.__name__} only works for vectorized Mobjects"
+            )
 
     def begin(self) -> None:
         self.outline = self.get_outline()
@@ -257,7 +265,7 @@ class DrawBorderThenFill(Animation):
             sm.set_stroke(color=self.get_stroke_color(sm), width=self.stroke_width)
         return outline
 
-    def get_stroke_color(self, vmobject: VMobject | OpenGLVMobject) -> Color:
+    def get_stroke_color(self, vmobject: VMobject | OpenGLVMobject) -> ManimColor:
         if self.stroke_color:
             return self.stroke_color
         elif vmobject.get_stroke_width() > 0:
@@ -275,7 +283,7 @@ class DrawBorderThenFill(Animation):
         alpha: float,
     ) -> None:  # Fixme: not matching the parent class? What is outline doing here?
         index: int
-        subalpha: int
+        subalpha: float
         index, subalpha = integer_interpolate(0, 2, alpha)
         if index == 0:
             submobject.pointwise_become_partial(outline, 0, subalpha)
@@ -299,7 +307,16 @@ class Write(DrawBorderThenFill):
 
         class ShowWriteReversed(Scene):
             def construct(self):
-                self.play(Write(Text("Hello", font_size=144), reverse=True))
+                self.play(Write(Text("Hello", font_size=144), reverse=True, remover=False))
+
+    Tests
+    -----
+
+    Check that creating empty :class:`.Write` animations works::
+
+        >>> from manim import Write, Text
+        >>> Write(Text(''))
+        Write(Text(''))
     """
 
     def __init__(
@@ -336,12 +353,9 @@ class Write(DrawBorderThenFill):
     ) -> tuple[float, float]:
         length = len(vmobject.family_members_with_points())
         if run_time is None:
-            if length < 15:
-                run_time = 1
-            else:
-                run_time = 2
+            run_time = 1 if length < 15 else 2
         if lag_ratio is None:
-            lag_ratio = min(4.0 / length, 0.2)
+            lag_ratio = min(4.0 / max(1.0, length), 0.2)
         return run_time, lag_ratio
 
     def reverse_submobjects(self) -> None:
@@ -363,7 +377,7 @@ class Unwrite(Write):
 
     Parameters
     ----------
-    reverse : :class:`bool`
+    reverse
         Set True to have the animation start erasing from the last submobject first.
 
     Examples
@@ -393,7 +407,6 @@ class Unwrite(Write):
         reverse: bool = True,
         **kwargs,
     ) -> None:
-
         run_time: float | None = kwargs.pop("run_time", None)
         lag_ratio: float | None = kwargs.pop("lag_ratio", None)
         run_time, lag_ratio = self._set_default_config_from_length(
@@ -405,7 +418,7 @@ class Unwrite(Write):
             vmobject,
             run_time=run_time,
             lag_ratio=lag_ratio,
-            rate_func=lambda t: -rate_func(t) + 1,
+            reverse_rate_function=True,
             reverse=reverse,
             **kwargs,
         )
@@ -446,7 +459,7 @@ class SpiralIn(Animation):
         fade_in_fraction=0.3,
         **kwargs,
     ) -> None:
-        self.shapes = shapes
+        self.shapes = shapes.copy()
         self.scale_factor = scale_factor
         self.shape_center = shapes.get_center()
         self.fade_in_fraction = fade_in_fraction
@@ -459,18 +472,25 @@ class SpiralIn(Animation):
             shape.move_to(shape.initial_position)
             shape.save_state()
 
-        super().__init__(shapes, **kwargs)
+        super().__init__(shapes, introducer=True, **kwargs)
 
     def interpolate_mobject(self, alpha: float) -> None:
-        for shape in self.shapes:
+        alpha = self.rate_func(alpha)
+        for original_shape, shape in zip(self.shapes, self.mobject):
             shape.restore()
-            shape.save_state()
-            opacity = shape.get_fill_opacity()
-            new_opacity = min(opacity, alpha * opacity / self.fade_in_fraction)
+            fill_opacity = original_shape.get_fill_opacity()
+            stroke_opacity = original_shape.get_stroke_opacity()
+            new_fill_opacity = min(
+                fill_opacity, alpha * fill_opacity / self.fade_in_fraction
+            )
+            new_stroke_opacity = min(
+                stroke_opacity, alpha * stroke_opacity / self.fade_in_fraction
+            )
             shape.shift((shape.final_position - shape.initial_position) * alpha)
             shape.rotate(TAU * alpha, about_point=self.shape_center)
             shape.rotate(-TAU * alpha, about_point=shape.get_center_of_mass())
-            shape.set_opacity(new_opacity)
+            shape.set_fill(opacity=new_fill_opacity)
+            shape.set_stroke(opacity=new_stroke_opacity)
 
 
 class ShowIncreasingSubsets(Animation):
@@ -494,6 +514,7 @@ class ShowIncreasingSubsets(Animation):
         group: Mobject,
         suspend_mobject_updating: bool = False,
         int_func: Callable[[np.ndarray], np.ndarray] = np.floor,
+        reverse_rate_function=False,
         **kwargs,
     ) -> None:
         self.all_submobs = list(group.submobjects)
@@ -501,17 +522,27 @@ class ShowIncreasingSubsets(Animation):
         for mobj in self.all_submobs:
             mobj.set_opacity(0)
         super().__init__(
-            group, suspend_mobject_updating=suspend_mobject_updating, **kwargs
+            group,
+            suspend_mobject_updating=suspend_mobject_updating,
+            reverse_rate_function=reverse_rate_function,
+            **kwargs,
         )
 
     def interpolate_mobject(self, alpha: float) -> None:
         n_submobs = len(self.all_submobs)
-        index = int(self.int_func(self.rate_func(alpha) * n_submobs))
+        value = (
+            1 - self.rate_func(alpha)
+            if self.reverse_rate_function
+            else self.rate_func(alpha)
+        )
+        index = int(self.int_func(value * n_submobs))
         self.update_submobject_list(index)
 
     def update_submobject_list(self, index: int) -> None:
         for mobj in self.all_submobs[:index]:
             mobj.set_opacity(1)
+        for mobj in self.all_submobs[index:]:
+            mobj.set_opacity(0)
 
 
 class AddTextLetterByLetter(ShowIncreasingSubsets):
@@ -519,7 +550,7 @@ class AddTextLetterByLetter(ShowIncreasingSubsets):
 
     Parameters
     ----------
-    time_per_char : :class:`float`
+    time_per_char
         Frequency of appearance of the letters.
 
     .. tip::
@@ -536,19 +567,69 @@ class AddTextLetterByLetter(ShowIncreasingSubsets):
         rate_func: Callable[[float], float] = linear,
         time_per_char: float = 0.1,
         run_time: float | None = None,
+        reverse_rate_function=False,
+        introducer=True,
         **kwargs,
     ) -> None:
-        # time_per_char must be above 0.06, or the animation won't finish
         self.time_per_char = time_per_char
+        # Check for empty text using family_members_with_points()
+        if not text.family_members_with_points():
+            raise ValueError(
+                f"The text mobject {text} does not seem to contain any characters."
+            )
         if run_time is None:
-            run_time = np.max((0.06, self.time_per_char)) * len(text)
-
+            # minimum time per character is 1/frame_rate, otherwise
+            # the animation does not finish.
+            run_time = np.max((1 / config.frame_rate, self.time_per_char)) * len(text)
         super().__init__(
             text,
             suspend_mobject_updating=suspend_mobject_updating,
             int_func=int_func,
             rate_func=rate_func,
             run_time=run_time,
+            reverse_rate_function=reverse_rate_function,
+            introducer=introducer,
+            **kwargs,
+        )
+
+
+class RemoveTextLetterByLetter(AddTextLetterByLetter):
+    """Remove a :class:`~.Text` letter by letter from the scene.
+
+    Parameters
+    ----------
+    time_per_char
+        Frequency of appearance of the letters.
+
+    .. tip::
+
+        This is currently only possible for class:`~.Text` and not for class:`~.MathTex`
+
+    """
+
+    def __init__(
+        self,
+        text: Text,
+        suspend_mobject_updating: bool = False,
+        int_func: Callable[[np.ndarray], np.ndarray] = np.ceil,
+        rate_func: Callable[[float], float] = linear,
+        time_per_char: float = 0.1,
+        run_time: float | None = None,
+        reverse_rate_function=True,
+        introducer=False,
+        remover=True,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            text,
+            suspend_mobject_updating=suspend_mobject_updating,
+            int_func=int_func,
+            rate_func=rate_func,
+            time_per_char=time_per_char,
+            run_time=run_time,
+            reverse_rate_function=reverse_rate_function,
+            introducer=introducer,
+            remover=remover,
             **kwargs,
         )
 
@@ -596,3 +677,176 @@ class AddTextWordByWord(Succession):
             )
         )
         super().__init__(*anims, **kwargs)
+
+
+class TypeWithCursor(AddTextLetterByLetter):
+    """Similar to :class:`~.AddTextLetterByLetter` , but with an additional cursor mobject at the end.
+
+    Parameters
+    ----------
+    time_per_char
+        Frequency of appearance of the letters.
+    cursor
+        :class:`~.Mobject` shown after the last added letter.
+    buff
+        Controls how far away the cursor is to the right of the last added letter.
+    keep_cursor_y
+        If ``True``, the cursor's y-coordinate is set to the center of the ``Text`` and remains the same throughout the animation. Otherwise, it is set to the center of the last added letter.
+    leave_cursor_on
+        Whether to show the cursor after the animation.
+
+    .. tip::
+        This is currently only possible for class:`~.Text` and not for class:`~.MathTex`.
+
+
+    Examples
+    --------
+
+    .. manim:: InsertingTextExample
+        :ref_classes: Blink
+
+        class InsertingTextExample(Scene):
+            def construct(self):
+                text = Text("Inserting", color=PURPLE).scale(1.5).to_edge(LEFT)
+                cursor = Rectangle(
+                    color = GREY_A,
+                    fill_color = GREY_A,
+                    fill_opacity = 1.0,
+                    height = 1.1,
+                    width = 0.5,
+                ).move_to(text[0]) # Position the cursor
+
+                self.play(TypeWithCursor(text, cursor))
+                self.play(Blink(cursor, blinks=2))
+
+    """
+
+    def __init__(
+        self,
+        text: Text,
+        cursor: Mobject,
+        buff: float = 0.1,
+        keep_cursor_y: bool = True,
+        leave_cursor_on: bool = True,
+        time_per_char: float = 0.1,
+        reverse_rate_function=False,
+        introducer=True,
+        **kwargs,
+    ) -> None:
+        self.cursor = cursor
+        self.buff = buff
+        self.keep_cursor_y = keep_cursor_y
+        self.leave_cursor_on = leave_cursor_on
+        super().__init__(
+            text,
+            time_per_char=time_per_char,
+            reverse_rate_function=reverse_rate_function,
+            introducer=introducer,
+            **kwargs,
+        )
+
+    def begin(self) -> None:
+        self.y_cursor = self.cursor.get_y()
+        self.cursor.initial_position = self.mobject.get_center()
+        if self.keep_cursor_y:
+            self.cursor.set_y(self.y_cursor)
+
+        self.cursor.set_opacity(0)
+        self.mobject.add(self.cursor)
+        super().begin()
+
+    def finish(self) -> None:
+        if self.leave_cursor_on:
+            self.cursor.set_opacity(1)
+        else:
+            self.cursor.set_opacity(0)
+            self.mobject.remove(self.cursor)
+        super().finish()
+
+    def clean_up_from_scene(self, scene: Scene) -> None:
+        if not self.leave_cursor_on:
+            scene.remove(self.cursor)
+        super().clean_up_from_scene(scene)
+
+    def update_submobject_list(self, index: int) -> None:
+        for mobj in self.all_submobs[:index]:
+            mobj.set_opacity(1)
+
+        for mobj in self.all_submobs[index:]:
+            mobj.set_opacity(0)
+
+        if index != 0:
+            self.cursor.next_to(
+                self.all_submobs[index - 1], RIGHT, buff=self.buff
+            ).set_y(self.cursor.initial_position[1])
+        else:
+            self.cursor.move_to(self.all_submobs[0]).set_y(
+                self.cursor.initial_position[1]
+            )
+
+        if self.keep_cursor_y:
+            self.cursor.set_y(self.y_cursor)
+        self.cursor.set_opacity(1)
+
+
+class UntypeWithCursor(TypeWithCursor):
+    """Similar to :class:`~.RemoveTextLetterByLetter` , but with an additional cursor mobject at the end.
+
+    Parameters
+    ----------
+    time_per_char
+        Frequency of appearance of the letters.
+    cursor
+        :class:`~.Mobject` shown after the last added letter.
+    buff
+        Controls how far away the cursor is to the right of the last added letter.
+    keep_cursor_y
+        If ``True``, the cursor's y-coordinate is set to the center of the ``Text`` and remains the same throughout the animation. Otherwise, it is set to the center of the last added letter.
+    leave_cursor_on
+        Whether to show the cursor after the animation.
+
+    .. tip::
+        This is currently only possible for class:`~.Text` and not for class:`~.MathTex`.
+
+
+    Examples
+    --------
+
+    .. manim:: DeletingTextExample
+        :ref_classes: Blink
+
+        class DeletingTextExample(Scene):
+            def construct(self):
+                text = Text("Deleting", color=PURPLE).scale(1.5).to_edge(LEFT)
+                cursor = Rectangle(
+                    color = GREY_A,
+                    fill_color = GREY_A,
+                    fill_opacity = 1.0,
+                    height = 1.1,
+                    width = 0.5,
+                ).move_to(text[0]) # Position the cursor
+
+                self.play(UntypeWithCursor(text, cursor))
+                self.play(Blink(cursor, blinks=2))
+
+    """
+
+    def __init__(
+        self,
+        text: Text,
+        cursor: VMobject | None = None,
+        time_per_char: float = 0.1,
+        reverse_rate_function=True,
+        introducer=False,
+        remover=True,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            text,
+            cursor=cursor,
+            time_per_char=time_per_char,
+            reverse_rate_function=reverse_rate_function,
+            introducer=introducer,
+            remover=remover,
+            **kwargs,
+        )

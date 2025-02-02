@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import typing
-from typing import Any
 
 import numpy as np
 
@@ -9,10 +8,20 @@ from manim.utils.hashing import get_hash_from_play_call
 
 from .. import config, logger
 from ..camera.camera import Camera
-from ..mobject.mobject import Mobject
+from ..mobject.mobject import Mobject, _AnimationBuilder
 from ..scene.scene_file_writer import SceneFileWriter
 from ..utils.exceptions import EndSceneEarlyException
 from ..utils.iterables import list_update
+
+if typing.TYPE_CHECKING:
+    from typing import Any
+
+    from manim.animation.animation import Animation
+    from manim.scene.scene import Scene
+
+    from ..typing import PixelArray
+
+__all__ = ["CairoRenderer"]
 
 
 class CairoRenderer:
@@ -48,7 +57,12 @@ class CairoRenderer:
             scene.__class__.__name__,
         )
 
-    def play(self, scene, *args, **kwargs):
+    def play(
+        self,
+        scene: Scene,
+        *args: Animation | Mobject | _AnimationBuilder,
+        **kwargs,
+    ):
         # Reset skip_animations to the original state.
         # Needed when rendering only some animations, and skipping others.
         self.skip_animations = self._original_skipping_status
@@ -90,7 +104,7 @@ class CairoRenderer:
         scene.begin_animations()
 
         # Save a static image, to avoid rendering non moving objects.
-        self.static_image = self.save_static_frame_data(scene, scene.static_mobjects)
+        self.save_static_frame_data(scene, scene.static_mobjects)
 
         if scene.is_current_animation_frozen_frame():
             self.update_frame(scene, mobjects=scene.moving_mobjects)
@@ -106,24 +120,23 @@ class CairoRenderer:
     def update_frame(  # TODO Description in Docstring
         self,
         scene,
-        mobjects=None,
-        include_submobjects=True,
-        ignore_skipping=True,
+        mobjects: typing.Iterable[Mobject] | None = None,
+        include_submobjects: bool = True,
+        ignore_skipping: bool = True,
         **kwargs,
     ):
         """Update the frame.
 
         Parameters
         ----------
-        mobjects: list, optional
+        scene
+
+        mobjects
             list of mobjects
 
-        background: np.ndarray, optional
-            Pixel Array for Background.
+        include_submobjects
 
-        include_submobjects: bool, optional
-
-        ignore_skipping : bool, optional
+        ignore_skipping
 
         **kwargs
 
@@ -147,7 +160,7 @@ class CairoRenderer:
         self.update_frame(scene, moving_mobjects)
         self.add_frame(self.get_frame())
 
-    def get_frame(self):
+    def get_frame(self) -> PixelArray:
         """
         Gets the current frame as NumPy array.
 
@@ -159,30 +172,29 @@ class CairoRenderer:
         """
         return np.array(self.camera.pixel_array)
 
-    def add_frame(self, frame, num_frames=1):
+    def add_frame(self, frame: np.ndarray, num_frames: int = 1):
         """
         Adds a frame to the video_file_stream
 
         Parameters
         ----------
-        frame : numpy.ndarray
+        frame
             The frame to add, as a pixel array.
-        num_frames: int
+        num_frames
             The number of times to add frame.
         """
         dt = 1 / self.camera.frame_rate
         if self.skip_animations:
             return
         self.time += num_frames * dt
-        for _ in range(num_frames):
-            self.file_writer.write_frame(frame)
+        self.file_writer.write_frame(frame, num_frames=num_frames)
 
     def freeze_current_frame(self, duration: float):
         """Adds a static frame to the movie for a given duration. The static frame is the current frame.
 
         Parameters
         ----------
-        duration : float
+        duration
             [description]
         """
         dt = 1 / self.camera.frame_rate
@@ -201,23 +213,23 @@ class CairoRenderer:
 
     def save_static_frame_data(
         self,
-        scene,
+        scene: Scene,
         static_mobjects: typing.Iterable[Mobject],
     ) -> typing.Iterable[Mobject] | None:
-        """Compute and save the static frame, that will be reused at each frame to avoid to unecesseraly computer
-        static mobjects.
+        """Compute and save the static frame, that will be reused at each frame
+        to avoid unnecessarily computing static mobjects.
 
         Parameters
         ----------
-        scene : Scene
+        scene
             The scene played.
-        static_mobjects : typing.Iterable[Mobject]
+        static_mobjects
             Static mobjects of the scene. If None, self.static_image is set to None
 
         Returns
         -------
         typing.Iterable[Mobject]
-            the static image computed.
+            The static image computed.
         """
         self.static_image = None
         if not static_mobjects:
@@ -240,13 +252,13 @@ class CairoRenderer:
         if config["save_last_frame"]:
             self.skip_animations = True
         if (
-            config["from_animation_number"]
-            and self.num_plays < config["from_animation_number"]
+            config.from_animation_number > 0
+            and self.num_plays < config.from_animation_number
         ):
             self.skip_animations = True
         if (
-            config["upto_animation_number"]
-            and self.num_plays > config["upto_animation_number"]
+            config.upto_animation_number >= 0
+            and self.num_plays > config.upto_animation_number
         ):
             self.skip_animations = True
             raise EndSceneEarlyException()

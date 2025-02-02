@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import os
+import contextlib
+import inspect
 import re
 import textwrap
 from pathlib import Path
@@ -10,7 +11,6 @@ import numpy as np
 
 from .. import config
 from ..utils import opengl
-from ..utils.simple_functions import get_parameters
 
 SHADER_FOLDER = Path(__file__).parent / "shaders"
 shader_program_cache: dict = {}
@@ -24,24 +24,23 @@ __all__ = [
 ]
 
 
-def get_shader_code_from_file(file_path):
+def get_shader_code_from_file(file_path: Path) -> str:
     if file_path in file_path_to_code_map:
         return file_path_to_code_map[file_path]
-    with open(file_path) as f:
-        source = f.read()
-        include_lines = re.finditer(
-            r"^#include (?P<include_path>.*\.glsl)$",
-            source,
-            flags=re.MULTILINE,
+    source = file_path.read_text()
+    include_lines = re.finditer(
+        r"^#include (?P<include_path>.*\.glsl)$",
+        source,
+        flags=re.MULTILINE,
+    )
+    for match in include_lines:
+        include_path = match.group("include_path")
+        included_code = get_shader_code_from_file(
+            file_path.parent / include_path,
         )
-        for match in include_lines:
-            include_path = match.group("include_path")
-            included_code = get_shader_code_from_file(
-                os.path.join(file_path.parent / include_path),
-            )
-            source = source.replace(match.group(0), included_code)
-        file_path_to_code_map[file_path] = source
-        return source
+        source = source.replace(match.group(0), included_code)
+    file_path_to_code_map[file_path] = source
+    return source
 
 
 def filter_attributes(unfiltered_attributes, attributes):
@@ -201,7 +200,7 @@ class Object3D:
         return self.time_based_updaters + self.non_time_updaters
 
     def add_updater(self, update_function, index=None, call_updater=True):
-        if "dt" in get_parameters(update_function):
+        if "dt" in inspect.signature(update_function).parameters:
             updater_list = self.time_based_updaters
         else:
             updater_list = self.non_time_updaters
@@ -314,7 +313,7 @@ class Mesh(Object3D):
         else:
             self.shader.context.disable(moderngl.DEPTH_TEST)
 
-        from moderngl.program_members.attribute import Attribute
+        from moderngl import Attribute
 
         shader_attributes = []
         for k, v in self.shader.shader_program._members.items():
@@ -384,10 +383,8 @@ class Shader:
             shader_program_cache[self.name] = self.shader_program
 
     def set_uniform(self, name, value):
-        try:
+        with contextlib.suppress(KeyError):
             self.shader_program[name] = value
-        except KeyError:
-            pass
 
 
 class FullScreenQuad(Mesh):

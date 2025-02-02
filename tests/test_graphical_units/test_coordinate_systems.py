@@ -37,6 +37,46 @@ def test_line_graph(scene):
     scene.add(plane, first_line, second_line)
 
 
+@frames_comparison(base_scene=ThreeDScene)
+def test_plot_surface(scene):
+    axes = ThreeDAxes(x_range=(-5, 5, 1), y_range=(-5, 5, 1), z_range=(-5, 5, 1))
+
+    def param_trig(u, v):
+        x = u
+        y = v
+        z = 2 * np.sin(x) + 2 * np.cos(y)
+        return z
+
+    trig_plane = axes.plot_surface(
+        param_trig,
+        u_range=(-5, 5),
+        v_range=(-5, 5),
+        color=BLUE,
+    )
+
+    scene.add(axes, trig_plane)
+
+
+@frames_comparison(base_scene=ThreeDScene)
+def test_plot_surface_colorscale(scene):
+    axes = ThreeDAxes(x_range=(-3, 3, 1), y_range=(-3, 3, 1), z_range=(-5, 5, 1))
+
+    def param_trig(u, v):
+        x = u
+        y = v
+        z = 2 * np.sin(x) + 2 * np.cos(y)
+        return z
+
+    trig_plane = axes.plot_surface(
+        param_trig,
+        u_range=(-3, 3),
+        v_range=(-3, 3),
+        colorscale=[BLUE, GREEN, YELLOW, ORANGE, RED],
+    )
+
+    scene.add(axes, trig_plane)
+
+
 @frames_comparison
 def test_implicit_graph(scene):
     ax = Axes()
@@ -53,6 +93,20 @@ def test_plot_log_x_axis(scene):
     )
 
     graph = ax.plot(lambda x: 2 if x < 10 else 1, x_range=[-1, 4])
+    scene.add(ax, graph)
+
+
+@frames_comparison
+def test_plot_log_x_axis_vectorized(scene):
+    ax = Axes(
+        x_range=[-1, 4],
+        y_range=[0, 3],
+        x_axis_config={"scaling": LogBase()},
+    )
+
+    graph = ax.plot(
+        lambda x: np.where(x < 10, 2, 1), x_range=[-1, 4], use_vectorized=True
+    )
     scene.add(ax, graph)
 
 
@@ -87,3 +141,33 @@ def test_number_plane_log(scene):
     )
 
     scene.add(VGroup(plane1, plane2).arrange())
+
+
+@frames_comparison
+def test_gradient_line_graph_x_axis(scene):
+    """Test that using `colorscale` generates a line whose gradient matches the y-axis"""
+    axes = Axes(x_range=[-3, 3], y_range=[-3, 3])
+
+    curve = axes.plot(
+        lambda x: 0.1 * x**3,
+        x_range=(-3, 3, 0.001),
+        colorscale=[BLUE, GREEN, YELLOW, ORANGE, RED],
+        colorscale_axis=0,
+    )
+
+    scene.add(axes, curve)
+
+
+@frames_comparison
+def test_gradient_line_graph_y_axis(scene):
+    """Test that using `colorscale` generates a line whose gradient matches the y-axis"""
+    axes = Axes(x_range=[-3, 3], y_range=[-3, 3])
+
+    curve = axes.plot(
+        lambda x: 0.1 * x**3,
+        x_range=(-3, 3, 0.001),
+        colorscale=[BLUE, GREEN, YELLOW, ORANGE, RED],
+        colorscale_axis=1,
+    )
+
+    scene.add(axes, curve)

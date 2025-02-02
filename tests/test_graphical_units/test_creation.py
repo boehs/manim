@@ -20,6 +20,13 @@ def test_uncreate(scene):
 
 
 @frames_comparison(last_frame=False)
+def test_uncreate_rate_func(scene):
+    square = Square()
+    scene.add(square)
+    scene.play(Uncreate(square), rate_func=linear)
+
+
+@frames_comparison(last_frame=False)
 def test_DrawBorderThenFill(scene):
     square = Square(fill_opacity=1)
     scene.play(DrawBorderThenFill(square))
@@ -87,3 +94,11 @@ def test_z_index_introducer(scene):
     b.set_z_index(-1)
     scene.play(Create(b))
     scene.wait()
+
+
+@frames_comparison(last_frame=False)
+def test_SpiralIn(scene):
+    circle = Circle().shift(LEFT)
+    square = Square().shift(UP)
+    shapes = VGroup(circle, square)
+    scene.play(SpiralIn(shapes))

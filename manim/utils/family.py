@@ -1,25 +1,28 @@
 from __future__ import annotations
 
 import itertools as it
+from collections.abc import Iterable
 
 from ..mobject.mobject import Mobject
 from ..utils.iterables import remove_list_redundancies
 
+__all__ = ["extract_mobject_family_members"]
+
 
 def extract_mobject_family_members(
-    mobjects,
-    use_z_index=False,
-    only_those_with_points=False,
-):
+    mobjects: Iterable[Mobject],
+    use_z_index: bool = False,
+    only_those_with_points: bool = False,
+) -> list[Mobject]:
     """Returns a list of the types of mobjects and their family members present.
     A "family" in this context refers to a mobject, its submobjects, and their
     submobjects, recursively.
 
     Parameters
     ----------
-    mobjects : Mobject
+    mobjects
         The Mobjects currently in the Scene
-    only_those_with_points : bool, optional
+    only_those_with_points
         Whether or not to only do this for
         those mobjects that have points. By default False
 

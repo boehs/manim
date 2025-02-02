@@ -1,9 +1,8 @@
-import os
 from pathlib import Path
 
 import manim.utils.opengl as opengl
 from manim import *
-from manim.opengl import *  # type: ignore
+from manim.opengl import *
 
 # Copied from https://3b1b.github.io/manim/getting_started/example_scenes.html#surfaceexample.
 # Lines that do not yet work with the Community Version are commented.
@@ -407,7 +406,7 @@ class InteractiveDevelopment(Scene):
         self.play(Create(square))
         self.wait()
 
-        # This opens an iPython termnial where you can keep writing
+        # This opens an iPython terminal where you can keep writing
         # lines as if they were part of this construct method.
         # In particular, 'square', 'circle' and 'self' will all be
         # part of the local namespace in that terminal.
@@ -462,7 +461,7 @@ class SurfaceExample(Scene):
         # in whatever you've set as the image directory in
         # the custom_config.yml file
 
-        script_location = Path(os.path.realpath(__file__)).parent
+        script_location = Path(__file__).resolve().parent
         day_texture = (
             script_location / "assets" / "1280px-Whole_world_-_land_and_oceans.jpg"
         )

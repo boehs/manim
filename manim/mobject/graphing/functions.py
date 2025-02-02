@@ -5,7 +5,8 @@ from __future__ import annotations
 __all__ = ["ParametricFunction", "FunctionGraph", "ImplicitFunction"]
 
 
-from typing import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 from isosurfaces import plot_isoline
@@ -14,6 +15,12 @@ from manim import config
 from manim.mobject.graphing.scale import LinearBase, _ScaleBase
 from manim.mobject.opengl.opengl_compatibility import ConvertToOpenGL
 from manim.mobject.types.vectorized_mobject import VMobject
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
+
+    from manim.typing import Point3D, Point3DLike
+
 from manim.utils.color import YELLOW
 
 
@@ -23,14 +30,19 @@ class ParametricFunction(VMobject, metaclass=ConvertToOpenGL):
     Parameters
     ----------
     function
-        The function to be plotted in the form of ``(lambda x: x**2)``
+        The function to be plotted in the form of ``(lambda t: (x(t), y(t), z(t)))``
     t_range
-        Determines the length that the function spans. By default ``[0, 1]``
+        Determines the length that the function spans in the form of (t_min, t_max, step=0.01). By default ``[0, 1]``
     scaling
         Scaling class applied to the points of the function. Default of :class:`~.LinearBase`.
     use_smoothing
         Whether to interpolate between the points of the function after they have been created.
         (Will have odd behaviour with a low number of points)
+    use_vectorized
+        Whether to pass in the generated t value array to the function as ``[t_0, t_1, ...]``.
+        Only use this if your function supports it. Output should be a numpy array
+        of shape ``[[x_0, x_1, ...], [y_0, y_1, ...], [z_0, z_1, ...]]`` but ``z`` can
+        also be 0 if the Axes is 2D
     discontinuities
         Values of t at which the function experiences discontinuity.
     dt
@@ -44,10 +56,10 @@ class ParametricFunction(VMobject, metaclass=ConvertToOpenGL):
 
         class PlotParametricFunction(Scene):
             def func(self, t):
-                return np.array((np.sin(2 * t), np.sin(3 * t), 0))
+                return (np.sin(2 * t), np.sin(3 * t), 0)
 
             def construct(self):
-                func = ParametricFunction(self.func, t_range = np.array([0, TAU]), fill_opacity=0).set_color(RED)
+                func = ParametricFunction(self.func, t_range = (0, TAU), fill_opacity=0).set_color(RED)
                 self.add(func.scale(3))
 
     .. manim:: ThreeDParametricSpring
@@ -56,11 +68,11 @@ class ParametricFunction(VMobject, metaclass=ConvertToOpenGL):
         class ThreeDParametricSpring(ThreeDScene):
             def construct(self):
                 curve1 = ParametricFunction(
-                    lambda u: np.array([
+                    lambda u: (
                         1.2 * np.cos(u),
                         1.2 * np.sin(u),
                         u * 0.05
-                    ]), color=RED, t_range = np.array([-3*TAU, 5*TAU, 0.01])
+                    ), color=RED, t_range = (-3*TAU, 5*TAU, 0.01)
                 ).set_shade_in_3d(True)
                 axes = ThreeDAxes()
                 self.add(axes, curve1)
@@ -92,36 +104,40 @@ class ParametricFunction(VMobject, metaclass=ConvertToOpenGL):
 
     def __init__(
         self,
-        function: Callable[[float, float], float],
-        t_range: Sequence[float] | None = None,
+        function: Callable[[float], Point3DLike],
+        t_range: tuple[float, float] | tuple[float, float, float] = (0, 1),
         scaling: _ScaleBase = LinearBase(),
         dt: float = 1e-8,
         discontinuities: Iterable[float] | None = None,
         use_smoothing: bool = True,
+        use_vectorized: bool = False,
         **kwargs,
     ):
-        self.function = function
-        t_range = [0, 1, 0.01] if t_range is None else t_range
+        def internal_parametric_function(t: float) -> Point3D:
+            """Wrap ``function``'s output inside a NumPy array."""
+            return np.asarray(function(t))
+
+        self.function = internal_parametric_function
         if len(t_range) == 2:
-            t_range = np.array([*t_range, 0.01])
+            t_range = (*t_range, 0.01)
 
         self.scaling = scaling
 
         self.dt = dt
         self.discontinuities = discontinuities
         self.use_smoothing = use_smoothing
+        self.use_vectorized = use_vectorized
         self.t_min, self.t_max, self.t_step = t_range
 
         super().__init__(**kwargs)
 
-    def get_function(self):
+    def get_function(self) -> Callable[[float], Point3D]:
         return self.function
 
-    def get_point_from_function(self, t):
+    def get_point_from_function(self, t: float) -> Point3D:
         return self.function(t)
 
-    def generate_points(self):
-
+    def generate_points(self) -> Self:
         if self.discontinuities is not None:
             discontinuities = filter(
                 lambda t: self.t_min <= t <= self.t_max,
@@ -147,7 +163,15 @@ class ParametricFunction(VMobject, metaclass=ConvertToOpenGL):
                     self.scaling.function(t2),
                 ],
             )
-            points = np.array([self.function(t) for t in t_range])
+
+            if self.use_vectorized:
+                x, y, z = self.function(t_range)
+                if not isinstance(z, np.ndarray):
+                    z = np.zeros_like(x)
+                points = np.stack([x, y, z], axis=1)
+            else:
+                points = np.array([self.function(t) for t in t_range])
+
             self.start_new_path(points[0])
             self.add_points_as_corners(points[1:])
         if self.use_smoothing:
@@ -188,7 +212,6 @@ class FunctionGraph(ParametricFunction):
     """
 
     def __init__(self, function, x_range=None, color=YELLOW, **kwargs):
-
         if x_range is None:
             x_range = np.array([-config["frame_x_radius"], config["frame_x_radius"]])
 

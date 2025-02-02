@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-try:
+import contextlib
+
+with contextlib.suppress(ImportError):
     from dearpygui import dearpygui as dpg
-except ImportError:
-    pass
 
 
 from manim.mobject.opengl.dot_cloud import *
+from manim.mobject.opengl.opengl_image_mobject import *
 from manim.mobject.opengl.opengl_mobject import *
 from manim.mobject.opengl.opengl_point_cloud_mobject import *
 from manim.mobject.opengl.opengl_surface import *
